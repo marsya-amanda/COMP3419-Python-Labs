@@ -1,0 +1,22 @@
+[project]
+name = "comp3419-labs"
+version = "0.1.0"
+description = "Reproducible Python environment for COMP3419 lab sessions"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "imageio>=2.37,<3",
+    "ipykernel>=6.29,<8",
+    "ipython>=8.32,<10",
+    "ipywidgets>=8.1,<9",
+    "jupyterlab>=4.3,<5",
+    "matplotlib>=3.10,<4",
+    "numpy>=2.2,<3",
+    "opencv-python>=4.11,<5",
+    "panda3d>=1.10.16,<1.11",
+    "pillow>=11.1,<13",
+    "pygame-ce>=2.5.7,<2.6",
+    "scipy>=1.15,<2",
+]
+
+[tool.uv]
+package = false
