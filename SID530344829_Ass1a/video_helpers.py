@@ -31,6 +31,7 @@ class VideoInfo:
         return self.frame_count / self.fps
 
     def inspect_representative_frames():
+        """inspect representative frames from beginning, middle, end"""
         pass
 
 @dataclass(frozen=True) // frozen?
@@ -40,9 +41,8 @@ class MacroblockMatcher:
     n_pairs: int
     block_width: int
     grid_stride: int
-    search_radius: int
+    search_radius: float # non-negative
     first_last_valid_centres: tuple[tuple[int, int], tuple[int, int]]
-    
 
 @dataclass(frozen=True)
 class ParameterEvidenceReport:
@@ -50,6 +50,20 @@ class ParameterEvidenceReport:
     runtime: float
     grid_coverage: float
     vector_counts: int
+
+@dataclass(frozen=True)
+class RetainedVectors:
+    """vector data"""
+    filtering_rule: str
+    source_block: tuple[int, int]
+    deltas: tuple[int, int]
+    confidence_measure: float
+    initial_frame: int
+    block_size: tuple[int, int]
+    search_radius: float
+    retained_count: int
+    rejected_count: int
+    sample_count: int
 
 def _decode_fourcc(value: int) -> str:
     """convert 4 byte seq to 4 ascii chars to get codec identifier"""
@@ -82,6 +96,30 @@ def inspect_video(path: str | Path) -> VideoIndo:
 
 def validate_video(path: str | Path, *, expected_frames: int | None = None, expected_fps: float | None, expected_size: tuple[int, int] | None = None, ) -> VideoInfo:
     """Decode encoded video by stream and return validated metadata"""
+    pass
+
+def calculate_ssd():
+    pass
+    
+def show_search_window():
+    pass
+
+def translate_crop(float x, float y):
+    pass
+
+def get_winning_candidate():
+    pass
+
+def get_minimum_ssd():
+    pass
+
+def inspect_candidate_centres():
+    pass
+
+def select_candidate_minimum_ssd():
+    pass
+
+def draw_retained_vectors():
     pass
 
 def match_macroblock_video(video_path: str | Path, output_path: str | Path, codec: str | None = None):
