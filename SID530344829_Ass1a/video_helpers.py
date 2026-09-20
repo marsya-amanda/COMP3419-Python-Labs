@@ -58,12 +58,16 @@ class RetainedVectors:
     source_block: tuple[int, int]
     deltas: tuple[int, int]
     confidence_measure: float
+
+@dataclass(frozen=True)
+class MotionField:
     initial_frame: int
     block_size: tuple[int, int]
     search_radius: float
     retained_count: int
     rejected_count: int
     sample_count: int
+    motion_vectors: list[RetainedVectors]
 
 def _decode_fourcc(value: int) -> str:
     """convert 4 byte seq to 4 ascii chars to get codec identifier"""
