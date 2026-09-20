@@ -30,6 +30,9 @@ class VideoInfo:
     def duration_seconds(self) -> float:
         return self.frame_count / self.fps
 
+    def inspect_representative_frames():
+        pass
+
 @dataclass(frozen=True) // frozen?
 class MacroblockMatcher:
     """params for macroblock matcher"""
@@ -39,16 +42,7 @@ class MacroblockMatcher:
     grid_stride: int
     search_radius: int
     first_last_valid_centres: tuple[tuple[int, int], tuple[int, int]]
-
-@dataclass(frozen=True)
-class EncodingReport:
-    width: int
-    height: int
-    fps: float
-    frame_count: int
-
-    def inspect_representative_frames():
-        pass
+    
 
 @dataclass(frozen=True)
 class ParameterEvidenceReport:
@@ -56,6 +50,10 @@ class ParameterEvidenceReport:
     runtime: float
     grid_coverage: float
     vector_counts: int
+
+def _decode_fourcc(value: int) -> str:
+    """convert 4 byte seq to 4 ascii chars to get codec identifier"""
+    return "".join(chr((value >> (8 * index)) & 0xFF) for index in range(4)).strip()
 
 def inspect_video(path: str | Path) -> VideoIndo:
     """Read and validate basic video metadata."""
@@ -81,4 +79,10 @@ def inspect_video(path: str | Path) -> VideoIndo:
     if frame_count <= 0:
         raise ValueError(f"No frames reported for {video_path}")
     return VideoInfo(video_path, width, height, channels, fps, frame_count, codec)
-    
+
+def validate_video(path: str | Path, *, expected_frames: int | None = None, expected_fps: float | None, expected_size: tuple[int, int] | None = None, ) -> VideoInfo:
+    """Decode encoded video by stream and return validated metadata"""
+    pass
+
+def match_macroblock_video(video_path: str | Path, output_path: str | Path, codec: str | None = None):
+    pass
