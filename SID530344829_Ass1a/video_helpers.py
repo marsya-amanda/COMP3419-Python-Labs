@@ -35,6 +35,14 @@ class VideoInfo:
         """inspect representative frames from beginning, middle, end"""
         pass
 
+@dataclass(frozen=True)
+class Macroblock:
+    ratio: Tuple[int, int, int]
+    x: int
+    y: int
+    delta_x: int
+    delta_y: int
+
 @dataclass(frozen=True) 
 class MacroblockMatcher:
     """params for macroblock matcher"""
@@ -131,6 +139,9 @@ def plot_samples(path: str | Path, count: int = 4) -> None:
 
 def validate_video(path: str | Path, *, expected_frames: int | None = None, expected_fps: float | None, expected_size: tuple[int, int] | None = None, ) -> VideoInfo:
     """Decode encoded video by stream and return validated metadata"""
+    pass
+
+def get_macroblocks(path: str | Path, frame: int):
     pass
 
 def calculate_ssd():
