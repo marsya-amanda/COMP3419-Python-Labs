@@ -37,11 +37,11 @@ class VideoInfo:
 
 @dataclass(frozen=True)
 class Macroblock:
-    ratio: Tuple[int, int, int]
-    x: int
-    y: int
-    delta_x: int
-    delta_y: int
+    sample: Image
+    frame_i: int
+    x: float # x-coord of source centre
+    y: float
+    search_radius: float
 
 @dataclass(frozen=True) 
 class MacroblockMatcher:
@@ -107,13 +107,31 @@ def inspect_video(path: str | Path) -> VideoInfo:
         raise ValueError(f"No frames reported for {video_path}")
     return VideoInfo(video_path, width, height, channels, fps, frame_count, codec)
 
+def sample_ith_frame(path: str | Path, i: int = 0) -> Image:
+    if i < 0:
+        raise ValueError("frame index must be positive")
+    info = inspect_video(path)
+    if i >= info.frame_count:
+        raise IndexError("frame index out of bounds")
+    sample = None
+    capture = cv2.VideoCapture(str(info.path))
+    try:
+        capture.set(cv2.CAP_PROP_POS_FRAMES, int(i))
+        ok, frame = capture.read()
+        if not ok:
+            raise RuntimeError(f"Could not decode frame {index} from {info.path}")
+        sample = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    finally:
+        capture.release()
+    return sample
+
 def sample_rgb_frames(path: str | Path, count: int = 4) -> list[tuple[int, Image]]:
-    """return evenly spaced rgb frames for notebook-safe matplotlib previews. taken from w4 video_compositing.py file"""
+    """return evenly spaced rgb frames for notebook-safe matplotlib previews. taken from w4 video_compositing.py file
+    does not use sample_ith_frame to avoid repeated calls to inspect)"""
     if count <= 0:
         raise ValueError("count must be positive")
     info = inspect_video(path)
     indices = np.linspace(0, info.frame_count - 1, min(count, info.frame_count), dtype=int)
-    capture = cv2.VideoCapture(str(info.path))
     samples: list[tuple[int, Image]] = []
     try:
         for index in indices:
@@ -139,26 +157,91 @@ def plot_samples(path: str | Path, count: int = 4) -> None:
 
 def validate_video(path: str | Path, *, expected_frames: int | None = None, expected_fps: float | None, expected_size: tuple[int, int] | None = None, ) -> VideoInfo:
     """Decode encoded video by stream and return validated metadata"""
+
+    info = inspect_video(path)
+    capture = cv2.VideoCapture(str(info.path))
+    decoded_frames = 0
+    try:
+        if not capture.isOpened():
+            raise RuntimeError(f"Could not reopen generated video: {info.path}")
+        while True:
+            readable, frame = capture.read()
+            if not readable:
+                break
+            decoded_frames += 1
+            if expected_size is not None:
+                decoded_size = (frame.shape[1], frame.shape[0])
+                if decoded_size != expected_size:
+                    raise ValueError(
+                        f"Expected frame size {expected_size}, "
+                        f"decoded {decoded_size} at frame {decoded_frames - 1}"
+                    )
+    finally:
+        capture.release()
+
+    if decoded_frames == 0:
+        raise ValueError(f"No frames could be decoded from {info.path}")
+    if expected_frames is not None and decoded_frames != expected_frames:
+        raise ValueError(f"Expected {expected_frames} frames, decoded {decoded_frames}")
+    if expected_frames is None and abs(decoded_frames - info.frame_count) > 1:
+        raise ValueError(
+            f"Container reports {info.frame_count} frames, decoded {decoded_frames}"
+        )
+    if expected_fps is not None and not np.isclose(info.fps, expected_fps, rtol=0.02):
+        raise ValueError(f"Expected about {expected_fps:.3f} FPS, decoded {info.fps:.3f}")
+    if expected_size is not None and (info.width, info.height) != expected_size:
+        raise ValueError(
+            f"Expected frame size {expected_size}, decoded {(info.width, info.height)}"
+        )
+    return VideoInfo(
+        path=info.path,
+        width=info.width,
+        height=info.height,
+        fps=info.fps,
+        frame_count=decoded_frames,
+        codec=info.codec,
+        channels=info.channels,
+    )
+
+def get_macroblocks(path: str | Path, frame_i: int, n_rows: int = 10, n_cols: int = 12) -> dict[tuple[float, float], Macroblock]:
+    vid_info = inspect_video(path)
+    frame = sample_ith_frame(path, frame_i)
+    temp_x = n_rows * 2 + 1
+    temp_y = n_cols * 2 + 1
+    gap_x = vid_info.width / ( temp_x )
+    gap_y = vid_info.height / ( temp_y )
+    candidate_centres = [(x*gap_x, y*gap_y) for x, y in zip(range(1, temp_x, 2), range(1, temp_y, 2))]
+
+    macroblocks = {}
+    for x_accent, y_accent in candidate_centres:
+        macroblocks[x_accent, y_accent] = Macroblock(sample=frame, frame_i=frame_i, x=x_accent, y=y_accent)
+
+    return macroblocks
+
+def macroblock_stream_to_pairs(dict[tuple[int, int], Macroblock]) -> dict[int, tuple[Macroblock, Macroblock]]:
+    """group macroblock streams to pairs"""
     pass
 
-def get_macroblocks(path: str | Path, frame: int):
-    pass
-
-def calculate_ssd():
+def calculate_ssd(width: int, height: int, search_radius: float, x: np.uint8, y: np.uint8):
+    """direct arithmetic in uint8 not valid for SSD → convert to float32 or float64, subtract, then accumulate in float64.
+    iterate per-pixel
+    SSD(x', y')=(over v,k,c)[F_i - F_{i+1}]^2
+    """
     pass
     
-def show_search_window():
-    pass
-
-def translate_crop(x: float, y: float):
-    pass
-
 def get_winning_candidate():
+    """run calculate ssd and update when find smaller"""
     pass
 
 def get_minimum_ssd():
     pass
 
+def show_search_window():
+    pass
+
+def translate_crop(x: float, y: float):
+    pass
+    
 def inspect_candidate_centres():
     pass
 
