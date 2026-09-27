@@ -37,7 +37,7 @@ class VideoInfo:
 
 @dataclass(frozen=True)
 class Macroblock:
-    sample: Image
+    image: Image
     frame_i: int
     x: float # x-coord of source centre
     y: float
@@ -133,6 +133,7 @@ def sample_rgb_frames(path: str | Path, count: int = 4) -> list[tuple[int, Image
     info = inspect_video(path)
     indices = np.linspace(0, info.frame_count - 1, min(count, info.frame_count), dtype=int)
     samples: list[tuple[int, Image]] = []
+    capture = cv2.VideoCapture(str(info.path))
     try:
         for index in indices:
             capture.set(cv2.CAP_PROP_POS_FRAMES, int(index))
@@ -157,7 +158,6 @@ def plot_samples(path: str | Path, count: int = 4) -> None:
 
 def validate_video(path: str | Path, *, expected_frames: int | None = None, expected_fps: float | None, expected_size: tuple[int, int] | None = None, ) -> VideoInfo:
     """Decode encoded video by stream and return validated metadata"""
-
     info = inspect_video(path)
     capture = cv2.VideoCapture(str(info.path))
     decoded_frames = 0
@@ -203,29 +203,49 @@ def validate_video(path: str | Path, *, expected_frames: int | None = None, expe
         channels=info.channels,
     )
 
-def get_macroblocks(path: str | Path, frame_i: int, n_rows: int = 10, n_cols: int = 12) -> dict[tuple[float, float], Macroblock]:
+def get_macroblocks(path: str | Path, frame_i: int = 0, n_rows: int = 10, n_cols: int = 12, search_radius = 6) -> list[Macroblock]:
+    """returns a dictionary with candidate_centre as key and macroblock obj as value"""
     vid_info = inspect_video(path)
     frame = sample_ith_frame(path, frame_i)
     temp_x = n_rows * 2 + 1
     temp_y = n_cols * 2 + 1
-    gap_x = vid_info.width / ( temp_x )
-    gap_y = vid_info.height / ( temp_y )
-    candidate_centres = [(x*gap_x, y*gap_y) for x, y in zip(range(1, temp_x, 2), range(1, temp_y, 2))]
+    gap_x = vid_info.width / ( temp_x - 1)
+    gap_y = vid_info.height / ( temp_y - 1)
+    candidate_centres = []
 
-    macroblocks = {}
-    for x_accent, y_accent in candidate_centres:
-        macroblocks[x_accent, y_accent] = Macroblock(sample=frame, frame_i=frame_i, x=x_accent, y=y_accent)
+    for y_index in range(1, temp_y, 2):
+        for x_index in range(1, temp_x, 2):
+            candidate_centres.append((x_index, y_index))
+
+    print(candidate_centres)
+            
+    macroblocks = []
+    for x_index, y_index in candidate_centres:
+        y_start = int((y_index - 1) * gap_y)
+        y_end = int((y_index+1) * gap_y)
+        x_start = int((x_index-1)*gap_x)
+        x_end = int((x_index+1) *gap_x)
+        cropped_img = frame[y_start:y_end, x_start:x_end]
+        macroblocks.append(Macroblock(image=cropped_img, frame_i=frame_i, x=x_index * gap_x, y=y_index*gap_y, search_radius=search_radius))
 
     return macroblocks
 
-def macroblock_stream_to_pairs(dict[tuple[int, int], Macroblock]) -> dict[int, tuple[Macroblock, Macroblock]]:
-    """group macroblock streams to pairs"""
-    pass
+def plot_macroblocks(macroblocks: list[Macroblock], n_rows: int = 12, n_cols: int = 10):
+    """plot macroblocks"""
+    fig, axes = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(n_rows*2, n_cols*2))
+    axes=axes.ravel()
+
+    for ax, block in zip(axes, macroblocks):
+        ax.imshow(block.image)
+        ax.axis('off')
+    plt.tight_layout()
+    plt.show()
+    
 
 def calculate_ssd(width: int, height: int, search_radius: float, x: np.uint8, y: np.uint8):
     """direct arithmetic in uint8 not valid for SSD → convert to float32 or float64, subtract, then accumulate in float64.
     iterate per-pixel
-    SSD(x', y')=(over v,k,c)[F_i - F_{i+1}]^2
+    SSD(x', y')=(over row_v,col_k,channel_c)[F_i - F_{i+1}]^2
     """
     pass
     
