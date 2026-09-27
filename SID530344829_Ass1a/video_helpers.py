@@ -42,6 +42,8 @@ class Macroblock:
     x: float # x-coord of source centre
     y: float
     search_radius: float
+    block_width: int
+    vector: tuple[float, float] | None
 
 @dataclass(frozen=True) 
 class MacroblockMatcher:
@@ -203,8 +205,10 @@ def validate_video(path: str | Path, *, expected_frames: int | None = None, expe
         channels=info.channels,
     )
 
-def get_macroblocks(path: str | Path, frame_i: int = 0, n_rows: int = 10, n_cols: int = 12, search_radius: int = 6) -> list[Macroblock]:
-    """returns a stream of macroblock objects"""
+"""def get_macroblocks(path: str | Path, frame_i: int = 0, block_width: int, n_rows: int = 10, n_cols: int = 12, search_radius: int = 6) -> list[Macroblock]:
+    #returns a stream of macroblock objects
+    #by number of columns and rows (wrong)
+    
     vid_info = inspect_video(path)
     frame = sample_ith_frame(path, frame_i)
     temp_x = n_rows * 2 + 1
@@ -226,11 +230,45 @@ def get_macroblocks(path: str | Path, frame_i: int = 0, n_rows: int = 10, n_cols
         cropped_img = frame[y_start:y_end, x_start:x_end]
         macroblocks.append(Macroblock(image=cropped_img, frame_i=frame_i, x=x_index * gap_x, y=y_index*gap_y, search_radius=search_radius))
 
-    return macroblocks
+    return macroblocks """
+
+def get_macroblocks(path: str | Path, frame_i: int = 0, block_width: int = 15, grid_stride: int = 48, search_radius: int = 6) -> tuple[tuple[int, int], tuple[int, int], list[Macroblock]]:
+    """returns first and last candidate centres, number of candidate rows, number of candidate columns, and list of macroblock objects"""
+    if block_width <= 0:
+        raise ValueError("block width must be odd positive integer")
+
+    vid_info = inspect_video(path)
+    frame = sample_ith_frame(path, frame_i)
+
+    #get n_blocks and n_cols
+    n_blocks_per_row = int((vid_info.width - block_width / 2) // grid_stride)
+    n_blocks_per_row += 1 if (vid_info.width - block_width / 2) % grid_stride >= (block_width+1) // 2 else 0
+
+    n_blocks_per_column = int((vid_info.height - block_width / 2) // grid_stride)
+    n_blocks_per_column += 1 if (vid_info.height - block_width / 2) % grid_stride >= (block_width+1) // 2 else 0
+
+    # get candidate centres
+    candidate_centres = []
+    for y_index in range(n_blocks_per_column):
+        for x_index in range(n_blocks_per_row):
+            candidate_centres.append((int(x_index * grid_stride + block_width / 2), int(y_index  * grid_stride + block_width / 2)))
+
+    # partition original frame to macroblocks
+    macroblocks = []
+    for x_centre, y_centre in candidate_centres:
+        y_start = y_centre - block_width // 2
+        y_end = y_start + block_width
+        x_start = x_centre - block_width // 2
+        x_end = x_start + block_width
+        cropped_img = frame[y_start:y_end, x_start:x_end]
+        macroblocks.append(Macroblock(image=cropped_img, frame_i=frame_i, x=x_centre, y=y_centre, block_width=block_width, search_radius=search_radius, vector=None))
+
+    return candidate_centres[0], candidate_centres[-1], n_blocks_per_row, n_blocks_per_column, macroblocks
+    
 
 def plot_macroblocks(macroblocks: list[Macroblock], n_rows: int = 10, n_cols: int = 12):
     """plot macroblocks"""
-    fig, axes = plt.subplots(nrows=n_rows, ncols=n_cols) # naming conventions differ
+    fig, axes = plt.subplots(nrows=n_cols, ncols=n_rows) # img coord to np pixel indexing
     axes=axes.ravel()
 
     for ax, block in zip(axes, macroblocks):
@@ -239,16 +277,16 @@ def plot_macroblocks(macroblocks: list[Macroblock], n_rows: int = 10, n_cols: in
     plt.tight_layout()
     plt.show()
 
-def get_macroblocks_consecutive_frames(path: str | Path, frame_start: int = 0, count: int = 50, n_rows: int = 10, n_cols = 12, search_radius: int = 6) -> list[list[Macroblock]]:
+def get_macroblocks_consecutive_frames(path: str | Path, frame_start: int = 0, count: int = 50, block_width: int = 15, grid_stride: int = 48, search_radius: int = 6) -> tuple[tuple[int, int], tuple[int, int], int, int, list[Macroblock]]:
     """output frames as a stream"""
     consecutive_frames = []
     for i in range(frame_start, frame_start + count):
-        macroblocks_i = get_macroblocks(path=path, frame_i=i, n_rows=n_rows, n_cols=n_cols, search_radius=search_radius)
+        macroblocks_i = get_macroblocks(path=path, frame_i=i, block_width=block_width, grid_stride=grid_stride, search_radius=search_radius)
         consecutive_frames.append(macroblocks_i)
     return consecutive_frames
         
 
-def calculate_ssd(width: int, height: int, search_radius: float, x: np.uint8, y: np.uint8):
+def calculate_ssd(width: int, height: int, search_radius: float, x: int, y: int):
     """direct arithmetic in uint8 not valid for SSD → convert to float32 or float64, subtract, then accumulate in float64.
     iterate per-pixel
     SSD(x', y')=(over row_v,col_k,channel_c)[F_i - F_{i+1}]^2
@@ -256,10 +294,7 @@ def calculate_ssd(width: int, height: int, search_radius: float, x: np.uint8, y:
     pass
     
 def get_winning_candidate():
-    """run calculate ssd and update when find smaller"""
-    pass
-
-def get_minimum_ssd():
+    """run calculate_ssd and update when find smaller"""
     pass
 
 def show_search_window():
