@@ -35,15 +35,15 @@ class VideoInfo:
         """inspect representative frames from beginning, middle, end"""
         pass
 
-@dataclass(frozen=True)
+@dataclass(frozen=False)
 class Macroblock:
     image: Image
     frame_i: int
-    x: float # x-coord of source centre
-    y: float
-    search_radius: float
+    x: int # x-coord of source centre
+    y: int
+    search_radius: int
     block_width: int
-    vector: tuple[float, float] | None
+    motion_displacement: tuple[float, float] | None
 
 @dataclass(frozen=True) 
 class MacroblockMatcher:
@@ -63,12 +63,12 @@ class ParameterEvidenceReport:
     vector_counts: int
 
 @dataclass(frozen=True)
-class RetainedVectors:
+class MotionVector:
     """vector data"""
     filtering_rule: str
-    source_block: tuple[int, int]
-    deltas: tuple[int, int]
-    confidence_measure: float
+    source_centre: tuple[int, int]
+    displacement: tuple[int, int]
+    #confidence_measure: float
 
 @dataclass(frozen=True)
 class MotionField:
@@ -78,7 +78,7 @@ class MotionField:
     retained_count: int
     rejected_count: int
     sample_count: int
-    motion_vectors: list[RetainedVectors]
+    motion_vectors: list[MotionVector]
 
 def _decode_fourcc(value: int) -> str:
     """convert 4 byte seq to 4 ascii chars to get codec identifier"""
@@ -286,18 +286,62 @@ def get_macroblocks_consecutive_frames(path: str | Path, frame_start: int = 0, c
         macroblocks_i = get_macroblocks(path=path, frame_i=i, block_width=block_width, grid_stride=grid_stride, search_radius=search_radius)
         consecutive_frames.append(macroblocks_i)
     return consecutive_frames
-        
 
-def calculate_ssd(width: int, height: int, search_radius: float, x: int, y: int):
+def get_valid_candidate_centres(width: int, height: int, source_x: int, source_y: int, k: int, search_radius: int) -> list[tuple[int, int]]:
+    """find candidate centres within [x-R,x+R]x[y-R,y+R] (inclusive!), 
+    whose complete blocks lie in F_{i+1}"""
+    
+    candidates = []
+    for v in range(-search_radius, search_radius+1):
+        for u in range(-search_radius, search_radius+1):
+            x = source_x + u
+            y = source_y + v
+            if x < k or x >= width - k - 1 or y < k or y > height - k - 1:
+                continue # ignore, block not completely within frame
+            candidates.append((x,y)) # update col (x) first, so winning candidate is row-major
+            
+    return candidates
+
+def calculate_ssd(frame_1: Image, frame_2: Image, source_x: int, source_y: int, candidate_x: int, candidate_y: int, k: int, n_channels: int) -> np.float64:
     """direct arithmetic in uint8 not valid for SSD → convert to float32 or float64, subtract, then accumulate in float64.
     iterate per-pixel
     SSD(x', y')=(over row_v,col_k,channel_c)[F_i - F_{i+1}]^2
+    calculation in float64, returns ssd in float64
     """
-    pass
+    frame_1 = frame_1.astype(np.float64)
+    frame_2 = frame_2.astype(np.float64)
+    ssd: np.float64 = 0
+
+    for v in range(-k, k+1):
+        for u in range(-k, k+1):
+            for c in range(0, n_channels):
+                ssd += np.square(np.subtract(frame_1[source_y+v, source_x+u, c], frame_2[candidate_y+v, candidate_x+u, c], dtype=np.float64)) # swap y and x around if wrong
+
+    return ssd
     
-def get_winning_candidate():
-    """run calculate_ssd and update when find smaller"""
-    pass
+def get_winning_candidate_of_block(width: int, height: int, frame_1: Image, frame_2: Image, search_radius: int, block_width: int, block: Macroblock, n_channels: int) -> MotionVector:
+    """run calculate_ssd and update when find smaller. if tie, apply first min in row-major order
+    check if x' and y' in frame here, not in calc ssd"""
+    k = int(block_width // 2)
+    source_x = block.x
+    source_y = block.y
+    
+    # generate valid candidate centres
+    candidate_centres = get_valid_candidate_centres(width=width, height=height, k=k, search_radius=search_radius)
+
+    # get min ssd
+    min_ssd = -math.inf
+    winning_candidate = None # tuple
+
+    for candidate_y, candidate_x in candidate_centres:
+        prev_min = min_ssd
+        min_ssd = min(min_ssd, calculate_ssd(frame_1=frame_1, frame_2=frame_2, source_x=source_x, source_y=source_y, candidate_x=candidate_x, candidate_y=candidate_y, k=k, n_channels=n_channels))
+        winning_candidate = (candidate_x, candidate_y) if min_ssd == prev_min else winning_candidate # update winning candidate if min_ssd updates
+
+    displacement = (winning_candidate[0] - source_x, winning_candidate[1] - source_y)
+    
+    motion_vector_obj = MotionVector(filtering_rule="ssd", source_centre=(source_x, source_y), displacement=displacement)
+    return displacement, motion_vector_obj
 
 def show_search_window():
     pass
