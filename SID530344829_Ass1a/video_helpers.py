@@ -248,10 +248,12 @@ def get_macroblocks(path: str | Path, frame_i: int = 0, block_width: int = 15, g
     n_blocks_per_column += 1 if (vid_info.height - block_width / 2) % grid_stride >= (block_width+1) // 2 else 0
 
     # get candidate centres
+    pad_x = (vid_info.width - grid_stride * n_blocks_per_row) // 2
+    pad_y = (vid_info.height - grid_stride * n_blocks_per_column) // 2
     candidate_centres = []
-    for y_index in range(n_blocks_per_column):
-        for x_index in range(n_blocks_per_row):
-            candidate_centres.append((int(x_index * grid_stride + block_width / 2), int(y_index  * grid_stride + block_width / 2)))
+    for x_index in range(n_blocks_per_column):
+        for y_index in range(n_blocks_per_row):
+            candidate_centres.append((int(x_index * grid_stride + block_width // 2 + pad_x), int(y_index  * grid_stride + block_width // 2 + pad_y)))
 
     # partition original frame to macroblocks
     macroblocks = []
@@ -260,7 +262,7 @@ def get_macroblocks(path: str | Path, frame_i: int = 0, block_width: int = 15, g
         y_end = y_start + block_width
         x_start = x_centre - block_width // 2
         x_end = x_start + block_width
-        cropped_img = frame[y_start:y_end, x_start:x_end]
+        cropped_img = frame[x_start:x_end, y_start:y_end]
         macroblocks.append(Macroblock(image=cropped_img, frame_i=frame_i, x=x_centre, y=y_centre, block_width=block_width, search_radius=search_radius, vector=None))
 
     return candidate_centres[0], candidate_centres[-1], n_blocks_per_row, n_blocks_per_column, macroblocks
@@ -268,7 +270,7 @@ def get_macroblocks(path: str | Path, frame_i: int = 0, block_width: int = 15, g
 
 def plot_macroblocks(macroblocks: list[Macroblock], n_rows: int = 10, n_cols: int = 12):
     """plot macroblocks"""
-    fig, axes = plt.subplots(nrows=n_cols, ncols=n_rows) # img coord to np pixel indexing
+    fig, axes = plt.subplots(nrows=n_cols, ncols=n_rows) 
     axes=axes.ravel()
 
     for ax, block in zip(axes, macroblocks):
