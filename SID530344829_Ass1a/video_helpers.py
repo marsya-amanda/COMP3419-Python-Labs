@@ -203,8 +203,8 @@ def validate_video(path: str | Path, *, expected_frames: int | None = None, expe
         channels=info.channels,
     )
 
-def get_macroblocks(path: str | Path, frame_i: int = 0, n_rows: int = 10, n_cols: int = 12, search_radius = 6) -> list[Macroblock]:
-    """returns a dictionary with candidate_centre as key and macroblock obj as value"""
+def get_macroblocks(path: str | Path, frame_i: int = 0, n_rows: int = 10, n_cols: int = 12, search_radius: int = 6) -> list[Macroblock]:
+    """returns a stream of macroblock objects"""
     vid_info = inspect_video(path)
     frame = sample_ith_frame(path, frame_i)
     temp_x = n_rows * 2 + 1
@@ -216,8 +216,6 @@ def get_macroblocks(path: str | Path, frame_i: int = 0, n_rows: int = 10, n_cols
     for y_index in range(1, temp_y, 2):
         for x_index in range(1, temp_x, 2):
             candidate_centres.append((x_index, y_index))
-
-    print(candidate_centres)
             
     macroblocks = []
     for x_index, y_index in candidate_centres:
@@ -230,9 +228,9 @@ def get_macroblocks(path: str | Path, frame_i: int = 0, n_rows: int = 10, n_cols
 
     return macroblocks
 
-def plot_macroblocks(macroblocks: list[Macroblock], n_rows: int = 12, n_cols: int = 10):
+def plot_macroblocks(macroblocks: list[Macroblock], n_rows: int = 10, n_cols: int = 12):
     """plot macroblocks"""
-    fig, axes = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(n_rows*2, n_cols*2))
+    fig, axes = plt.subplots(nrows=n_rows, ncols=n_cols) # naming conventions differ
     axes=axes.ravel()
 
     for ax, block in zip(axes, macroblocks):
@@ -240,7 +238,15 @@ def plot_macroblocks(macroblocks: list[Macroblock], n_rows: int = 12, n_cols: in
         ax.axis('off')
     plt.tight_layout()
     plt.show()
-    
+
+def get_macroblocks_consecutive_frames(path: str | Path, frame_start: int = 0, count: int = 50, n_rows: int = 10, n_cols = 12, search_radius: int = 6) -> list[list[Macroblock]]:
+    """output frames as a stream"""
+    consecutive_frames = []
+    for i in range(frame_start, frame_start + count):
+        macroblocks_i = get_macroblocks(path=path, frame_i=i, n_rows=n_rows, n_cols=n_cols, search_radius=search_radius)
+        consecutive_frames.append(macroblocks_i)
+    return consecutive_frames
+        
 
 def calculate_ssd(width: int, height: int, search_radius: float, x: np.uint8, y: np.uint8):
     """direct arithmetic in uint8 not valid for SSD → convert to float32 or float64, subtract, then accumulate in float64.
