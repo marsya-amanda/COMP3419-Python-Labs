@@ -279,30 +279,10 @@ def plot_macroblocks(macroblocks: list[Macroblock], n_rows: int = 10, n_cols: in
     plt.tight_layout()
     plt.show()
 
-def get_macroblocks_consecutive_frames(path: str | Path, frame_start: int = 0, count: int = 50, block_width: int = 15, grid_stride: int = 48, search_radius: int = 6) -> tuple[tuple[int, int], tuple[int, int], int, int, list[Macroblock]]:
-    """output frames as a stream"""
-    consecutive_frames = []
-    for i in range(frame_start, frame_start + count):
-        macroblocks_i = get_macroblocks(path=path, frame_i=i, block_width=block_width, grid_stride=grid_stride, search_radius=search_radius)
-        consecutive_frames.append(macroblocks_i)
-    return consecutive_frames
-
-def get_valid_candidate_centres(width: int, height: int, source_x: int, source_y: int, k: int, search_radius: int) -> list[tuple[int, int]]:
-    """find candidate centres within [x-R,x+R]x[y-R,y+R] (inclusive!), 
-    whose complete blocks lie in F_{i+1}"""
-    
-    candidates = []
-    for v in range(-search_radius, search_radius+1):
-        for u in range(-search_radius, search_radius+1):
-            x = source_x + u
-            y = source_y + v
-            if x < k or x >= width - k - 1 or y < k or y > height - k - 1:
-                continue # ignore, block not completely within frame
-            candidates.append((x,y)) # update col (x) first, so winning candidate is row-major
-            
-    return candidates
-
-def calculate_ssd(frame_1: Image, frame_2: Image, source_x: int, source_y: int, candidate_x: int, candidate_y: int, k: int, n_channels: int) -> np.float64:
+def calculate_ssd(
+    frame_1: Image, 
+    frame_2: Image, 
+    source_x: int, source_y: int, candidate_x: int, candidate_y: int, k: int, n_channels: int) -> np.float64:
     """direct arithmetic in uint8 not valid for SSD → convert to float32 or float64, subtract, then accumulate in float64.
     iterate per-pixel
     SSD(x', y')=(over row_v,col_k,channel_c)[F_i - F_{i+1}]^2
@@ -319,7 +299,15 @@ def calculate_ssd(frame_1: Image, frame_2: Image, source_x: int, source_y: int, 
 
     return ssd
     
-def get_winning_candidate_of_block(width: int, height: int, frame_1: Image, frame_2: Image, search_radius: int, block_width: int, block: Macroblock, n_channels: int) -> MotionVector:
+def get_winning_candidate_of_block(
+    width: int, 
+    height: int, 
+    frame_1: Image, 
+    frame_2: Image, 
+    search_radius: int, 
+    block_width: int, 
+    block: Macroblock, 
+    n_channels: int) -> tuple[tuple[int, int], MotionVector]:
     """run calculate_ssd and update when find smaller. if tie, apply first min in row-major order
     check if x' and y' in frame here, not in calc ssd"""
     k = int(block_width // 2)
@@ -343,20 +331,56 @@ def get_winning_candidate_of_block(width: int, height: int, frame_1: Image, fram
     motion_vector_obj = MotionVector(filtering_rule="ssd", source_centre=(source_x, source_y), displacement=displacement)
     return displacement, motion_vector_obj
 
-def show_search_window():
-    pass
+def get_macroblocks_consecutive_frames(path: str | Path, frame_start: int = 0, count: int = 50, block_width: int = 15, grid_stride: int = 48, search_radius: int = 6) -> list[tuple[int, int], tuple[int, int], int, int, list[Macroblock]]:
+    """output frames as a stream"""
+    consecutive_frames = []
+    for i in range(frame_start, frame_start + count):
+        macroblocks_i = get_macroblocks(path=path, frame_i=i, block_width=block_width, grid_stride=grid_stride, search_radius=search_radius)
+        consecutive_frames.append(macroblocks_i)
+    return consecutive_frames
 
-def translate_crop(x: float, y: float):
-    pass
+def get_valid_candidate_centres(width: int, height: int, source_x: int, source_y: int, k: int, search_radius: int) -> list[tuple[int, int]]:
+    """find candidate centres within [x-R,x+R]x[y-R,y+R] (inclusive!), 
+    whose complete blocks lie in F_{i+1}"""
     
-def inspect_candidate_centres():
+    candidates = []
+    for v in range(-search_radius, search_radius+1):
+        for u in range(-search_radius, search_radius+1):
+            x = source_x + u
+            y = source_y + v
+            if x < k or x >= width - k - 1 or y < k or y > height - k - 1:
+                continue # ignore, block not completely within frame
+            candidates.append((x,y)) # update col (x) first, so winning candidate is row-major
+    return candidates
+
+def process_motion_frame_pairs():
     pass
 
-def select_candidate_minimum_ssd():
-    pass
+def show_macroblock(path: str | Path, frame_i: int, out_path: str | Path, block: Macroblock):
+    x1 = int(block.x - block_width // 2)
+    x2 = int(block.x + (block_width + 1) // 2)
+    y1 = int(block.y - block_width // 2)
+    y2 = int(block.y - (block_width + 1) // 2)
 
-def draw_retained_vectors():
-    pass
+    img = sample_ith_frame(path, frame_i)
+    cv2.rectangle(image, (x1, y1), (x2, y2), (0, 0, 0), 5) # draw macroblock rectangle on image in black with thickness 5
+    cv2.imwrite(out_path, img) # save
 
-def match_macroblock_video(video_path: str | Path, output_path: str | Path, codec: str | None = None):
-    pass
+def draw_search_window(path: str | Path, frame_i: int, block: Macroblock):
+    img = sample_ith_frame(path, frame_i)
+    cv2.circle(image, (block.x, block.y), block.search_radius, (255, 255, 255), 3) # search window on image in white w thickness 3
+    cv2.imwrite(out_path, img)
+
+def draw_one_motion_vector(path: str | Path, frame_i: int, out_path: str | Path, vector: MotionVector):
+    img = sample_ith_frame(path, frame_i)
+    start = vector.source_center
+    end = vector.source_center + displacement
+    cv2.arrowedLine(img, start, end, (0, 0, 255), 3) # draw motion vector in red w thickess 3
+    cv2.imwrite(out_path, img)
+
+def draw_motion_vectors(path: str | Path, frame_i: int, out_path: str | Path, vector_arr: list[MotionVector]):
+    img = sample_ith_frame(path, frame_i)
+
+    for vector in vector_arr:
+        draw_one_motion_vector(path, frame_i, out_path, vector)
+        path = out_path
