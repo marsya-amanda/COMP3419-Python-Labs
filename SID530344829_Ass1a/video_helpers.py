@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 import matplotlib.pyplot as plt
+import math
 
 ASS_DIR = Path(__file__).resolve().parent
 DATA_DIR = ASS_DIR / "data"
@@ -23,7 +24,7 @@ class VideoInfo:
     width: int
     height: int
     channels: int
-    fps: float
+    fps: int
     frame_count: int
     codec: str
 
@@ -45,22 +46,13 @@ class Macroblock:
     block_width: int
     motion_displacement: tuple[float, float] | None
 
-    def update_centre(new_centre: tuple[int, int]):
+    def update_centre(self, new_centre: tuple[int, int]):
+        """if want to do iterative"""
         self.x = new_centre[0]
         self.y = new_centre[1]
 
-    def set_displacement(d: tuple[float, float]):
+    def set_displacement(self, d: tuple[float, float]):
         self.motion_displacement = d
-
-@dataclass(frozen=True) 
-class MacroblockMatcher:
-    """params for macroblock matcher"""
-    # common checkpoint baseline
-    n_pairs: int
-    block_width: int
-    grid_stride: int
-    search_radius: float # non-negative
-    first_last_valid_centres: tuple[tuple[int, int], tuple[int, int]]
 
 @dataclass(frozen=True)
 class ParameterEvidenceReport:
@@ -76,6 +68,19 @@ class MotionVector:
     source_centre: tuple[int, int]
     displacement: tuple[int, int]
     #confidence_measure: float
+
+@dataclass(frozen=True) 
+class MotionEstimationReport:
+    video_info: VideoInfo
+    frame_i: int
+    block_width: int
+    grid_stride: int
+    search_radius: int # non-negative
+    first_last_valid_centres: tuple[tuple[int, int], tuple[int, int]]
+    n_rows: int
+    n_cols: int
+    blocks: list[Macroblock]
+    retained_vectors: list[MotionVector]
 
 @dataclass(frozen=True)
 class MotionField:
@@ -154,7 +159,7 @@ def sample_rgb_frames(path: str | Path, count: int = 4) -> list[tuple[int, Image
         capture.release()
     return samples
 
-def plot_samples(path: str | Path, count: int = 4) -> None:
+def plot_samples(path: str | Path, count: int = 1) -> None:
     """inline display of frames"""
     samples = sample_rgb_frames(path, count)
     figure, axes = plt.subplots(1, len(samples), figsize=(4 * len(samples), 3))
@@ -249,28 +254,31 @@ def get_macroblocks(path: str | Path, frame_i: int = 0, block_width: int = 15, g
 
     #get n_blocks and n_cols
     n_blocks_per_row = int((vid_info.width - block_width / 2) // grid_stride)
-    n_blocks_per_row += 1 if (vid_info.width - block_width / 2) % grid_stride >= (block_width+1) // 2 else 0
+    #n_blocks_per_row += 1 if (vid_info.width - block_width / 2) % grid_stride >= (block_width+1) // 2 else 0
 
     n_blocks_per_column = int((vid_info.height - block_width / 2) // grid_stride)
-    n_blocks_per_column += 1 if (vid_info.height - block_width / 2) % grid_stride >= (block_width+1) // 2 else 0
+    #n_blocks_per_column += 1 if (vid_info.height - block_width / 2) % grid_stride >= (block_width+1) // 2 else 0
 
     # get candidate centres
-    pad_x = (vid_info.width - grid_stride * n_blocks_per_row) // 2
-    pad_y = (vid_info.height - grid_stride * n_blocks_per_column) // 2
+    pad_x = max(0, (vid_info.width - grid_stride * n_blocks_per_row) // 2)
+    pad_y = max(0, (vid_info.height - grid_stride * n_blocks_per_column) // 2)
     candidate_centres = []
     for x_index in range(n_blocks_per_column):
         for y_index in range(n_blocks_per_row):
-            candidate_centres.append((int(x_index * grid_stride + block_width // 2 + pad_x), int(y_index  * grid_stride + block_width // 2 + pad_y)))
+            candidate_centres.append((int(x_index * grid_stride + block_width // 2 + pad_x), int(y_index * grid_stride + block_width // 2 + pad_y)))
 
     # partition original frame to macroblocks
     macroblocks = []
     for x_centre, y_centre in candidate_centres:
-        y_start = y_centre - block_width // 2
-        y_end = y_start + block_width
-        x_start = x_centre - block_width // 2
-        x_end = x_start + block_width
+        y_start = int(y_centre - block_width // 2)
+        y_end = int(y_start + block_width)
+        x_start = int(x_centre - block_width // 2)
+        x_end = int(x_start + block_width)
         cropped_img = frame[x_start:x_end, y_start:y_end]
-        macroblocks.append(Macroblock(image=cropped_img, frame_i=frame_i, x=x_centre, y=y_centre, block_width=block_width, search_radius=search_radius, vector=None))
+        if cropped_img.size != 0:
+            macroblocks.append(Macroblock(image=cropped_img, frame_i=frame_i, x=x_centre, y=y_centre, block_width=block_width, search_radius=search_radius, motion_displacement=None))
+        if cropped_img.size == 0:
+            print(f"{(x_start, y_start)}, {(x_end, y_end)} has no cropped image")
 
     return candidate_centres[0], candidate_centres[-1], n_blocks_per_row, n_blocks_per_column, macroblocks
 
@@ -325,9 +333,8 @@ def get_valid_candidate_centres(width: int, height: int, source_x: int, source_y
         for u in range(-search_radius, search_radius+1):
             x = source_x + u
             y = source_y + v
-            if x < k or x >= width - k - 1 or y < k or y > height - k - 1:
-                continue # ignore, block not completely within frame
-            candidates.append((x,y)) # update col (x) first, so winning candidate is row-major
+            if (x < k or x >= width - k - 2 or y < k or y >= height - k - 2) is not True:
+                candidates.append((x,y)) # update col (x) first, so winning candidate is row-major
     return candidates
     
 def get_winning_candidate_of_block(
@@ -346,72 +353,148 @@ def get_winning_candidate_of_block(
     source_y = block.y
     
     # generate valid candidate centres
-    candidate_centres = get_valid_candidate_centres(width=width, height=height, k=k, search_radius=search_radius)
+    candidate_centres = get_valid_candidate_centres(width=width, height=height, source_x=source_x, source_y=source_y, k=k, search_radius=search_radius)
+    if candidate_centres is None:
+        raise ValueError("no valid candidate centres found")
 
     # get min ssd
-    min_ssd = -math.inf
+    min_ssd = math.inf #previously -inf
     winning_candidate = None # tuple
 
     for candidate_y, candidate_x in candidate_centres:
         prev_min = min_ssd
         min_ssd = min(min_ssd, calculate_ssd(frame_1=frame_1, frame_2=frame_2, source_x=source_x, source_y=source_y, candidate_x=candidate_x, candidate_y=candidate_y, k=k, n_channels=n_channels))
         winning_candidate = (candidate_x, candidate_y) if min_ssd == prev_min else winning_candidate # update winning candidate if min_ssd updates
-
-    displacement = (winning_candidate[0] - source_x, winning_candidate[1] - source_y)
+    # print(winning_candidate)
+    displacement = (winning_candidate[0] - source_x, winning_candidate[1] - source_y) if winning_candidate is not None else (0, 0) # no candidate_centres
     
     motion_vector_obj = MotionVector(filtering_rule="ssd", source_centre=(source_x, source_y), displacement=displacement)
     return displacement, motion_vector_obj
 
-def estimate_motion_one_pair(path: str | Path, frame_i: int = 0, block_width: int = 15, grid_stride: int = 48, search_radius: int = 6) -> list[MotionVector]:
+def estimate_motion_one_pair(path: str | Path, frame_i: int = 0, block_width: int = 15, grid_stride: int = 48, search_radius: int = 6) -> MotionEstimationReport:
+    print(f"Starting motion estimation between frame {frame_i} and {frame_i+1}.")
     vid_info = inspect_video(path)
-    first_centre, last_centre, len(macroblocks), n_candidate_rows, n_candidate_cols, macroblocks = get_macroblocks(path, frame_start, count, block_width, grid_stride, search_radius) #macroblock centres are fixed
+
+    print(f"Getting macroblocks...")
+    first_centre, last_centre, n_candidate_rows, n_candidate_cols, blocks = get_macroblocks(path, frame_i, block_width, grid_stride, search_radius) #macroblock centres are fixed
+
+    print(f"First valid centre: {first_centre}\nLast valid centre: {last_centre}\nNumber of macroblocks: {len(blocks)}")
     
     retained_vectors = []
     frame_1: Image = sample_ith_frame(path, frame_i)
     frame_2: Image = sample_ith_frame(path, frame_i + 1) # next frame
 
-    for block in macroblocks:
+    print("Getting motion displacements for each block...")
+    for block in blocks:
+        print(f"Getting best motion vector for block ({block.x}, {block.y})")
         curr_d, curr_mv = get_winning_candidate_of_block(vid_info.width, vid_info.height, frame_1, frame_2, search_radius, block_width, block, vid_info.channels)
         block.set_displacement(curr_d)
         retained_vectors.append(curr_mv)
 
-    return retained_vectors
+    return MotionEstimationReport(vid_info, 
+                                  frame_i, 
+                                  block_width, 
+                                  grid_stride, 
+                                  search_radius, 
+                                  (first_centre, last_centre), 
+                                  n_candidate_rows, 
+                                  n_candidate_cols, 
+                                  blocks, 
+                                  retained_vectors)
 
-def estimate_motion_consecutive_pairs(path: str | Path, frame_start: int = 0, count: int = 50, block_width: int = 15, grid_stride: int = 48, search_radius: int = 6) -> list[list[MotionVector]]:
+def estimate_motion_consecutive_pairs(path: str | Path, frame_start: int = 0, count: int = 50, block_width: int = 15, grid_stride: int = 48, search_radius: int = 6) -> list[MotionEstimationReport]:
     """expect n-1 motion vector lists, from n-1 pairs"""
-    all_retained_vectors = []
+    all_reports = []
     frame_end = frame_start + count
 
     for i in range(frame_start, frame_end):
-        all_retained_vectors.append(estimate_motion_one_pair(path, i, block_width, grid_stride, search_radius))
+        all_reports.append(estimate_motion_one_pair(path, i, block_width, grid_stride, search_radius))
 
-    return all_retained_vectors
+    return all_reports
 
-def draw_macroblock(img: Image, out_path: str | Path, block: Macroblock) ->:
-    x1 = int(block.x - block_width // 2)
-    x2 = int(block.x + (block_width + 1) // 2)
-    y1 = int(block.y - block_width // 2)
-    y2 = int(block.y - (block_width + 1) // 2)
+def draw_macroblock(img: Image, out_path: str | Path | None, block: Macroblock) -> Image:
+    x1 = int(block.x - block.block_width // 2)
+    x2 = int(block.x + (block.block_width + 1) // 2)
+    y1 = int(block.y - block.block_width // 2)
+    y2 = int(block.y + (block.block_width + 1) // 2)
 
-    cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 0), 5) # draw macroblock rectangle on image in black with thickness 5
-    cv2.imwrite(out_path, img) # save
+    cv2.rectangle(img, (y1, x1), (y2, x2), (255, 255, 255), 3) # draw macroblock rectangle on image in white with thickness 3
+    if out_path is not None:
+        cv2.imwrite(out_path, img) # save
+    return img
 
-def draw_macroblocks(img: Image, out_path: str | Path, blocks: list[Macroblock]):
-    for block in 
+def draw_macroblocks(img: Image, out_path: str | Path | None, blocks: list[Macroblock]) -> Image:
+    for block in blocks:
+        draw_macroblock(img, out_path, block)
+    return img
 
-def draw_search_window(img: Image, block: Macroblock):
+def draw_search_window(img: Image, out_path: str | Path | None, block: Macroblock) -> Image:
     cv2.circle(img, (block.x, block.y), block.search_radius, (255, 255, 255), 3) # search window on image in white w thickness 3
-    cv2.imwrite(out_path, img)
+    if out_path is not None:
+        cv2.imwrite(out_path, img)
+    return img
 
-def draw_one_motion_vector(img: Image, out_path: str | Path, vector: MotionVector):
+def draw_search_windows(img, out_path: str | Path | None, blocks: list[Macroblock]) -> Image:
+    for block in blocks:
+        draw_search_window(img, out_path, block)
+    return img
+
+def draw_one_motion_vector(img: Image, out_path: str | Path | None, vector: MotionVector) -> Image:
     start = vector.source_center
     end = vector.source_center + displacement
     cv2.arrowedLine(img, start, end, (0, 0, 255), 3) # draw motion vector in red w thickess 3
-    cv2.imwrite(out_path, img)
+    if out_path is not None:
+        cv2.imwrite(out_path, img)
+    return img
 
-def draw_motion_vectors(img: Image, out_path: str | Path, vector_arr: list[MotionVector]):   
+def draw_motion_vectors(img: Image, out_path: str | Path | None, vector_arr: list[MotionVector]) -> Image:   
     for vector in vector_arr:
         draw_one_motion_vector(img, out_path, vector)
-        path = out_path # overwrite previous
+    return img
 
-def draw_block_search_motion_overlay(path: str | Path, frame_i, out_path: str | Path, vector_arr: list[MotionVector]) -> Image
+def draw_block_search_motion_overlay(out_path: str | Path | None, report: MotionEstimationReport) -> tuple[Image, Image, Image]:
+    og_img = sample_ith_frame(report.path, report.path_i)
+    target_img = sample_ith_frame(report.path, report.path_i + 1)
+    annotated_img = None
+
+    # draw macroblock
+    annotated_img = draw_macroblocks(og_img, out_path, report.blocks)
+
+    # draw search radius
+    annotated_img = draw_search_windows(og_img, out_path, report.blocks)
+
+    # draw motion vectors
+    annotated_img = draw_motion_vectors(og_img, out_path, report.retained_vectors)
+
+    return og_img, target_img, annotated_img
+
+def calculate_and_draw_search_motion_one_pair(path: str | Path, out_path: str | Path | None, frame_i: int = 0, block_width: int = 15, grid_stride: int = 48, search_radius: int = 6) -> tuple[MotionEstimationReport, Image, Image, Image]:
+    report = estimate_motion_one_pair(path, frame_i, block_width, grid_stride, search_radius)
+    og, target, annotated = draw_block_search_motion_overlay(out_path, report)
+
+    return report, og, target, annotated
+
+def calculate_and_show_search_motion_pairs_as_video(path: str | Path, vid_out_path: str | Path = "SID430344829_Ass1a_output.mp4", frame_start: int = 0, count: int = 50, block_width: int = 15, grid_stride: int = 48, search_radius: int = 6) -> str | Path:
+    """returns report of size pair_count-1, og video and annotated video. no directory for each frame, write to videowriter"""
+    vid_info = inspect_video(path)
+    frame_end = frame_start + count
+    vid_dims = (vid_info.height, vid_info.width)
+
+    video_writer = cv2.VideoWriter(out_path, vid_info.codec, vid_info.fps, vid_dims)
+    for i in range(frame_start, frame_end):
+        report_i, og_i, target_i, annotated_i = calculate_and_draw_search_motion_one_pair(path, None, i, block_width_grid_stride, search_radius) # out_path is None to prevent writing on directory
+        annotated_i = cv2.resize(annotated_i, vid_dims)
+        video_writer.write(annotated_i)
+
+    video_writer.release()
+    return vid_out_path
+
+
+def plot_frame_arr(frames: list[tuple[str, Image]], count: int = 1) -> None:
+    figure, axes = plt.subplots(1, len(samples), figsize=(4 * len(samples), 3))
+    axes_array = np.atleast_1d(axes)
+    for axis, (title, frame) in zip(axes_array,frames):
+        axis.imshow(frame)
+        axis.set_title(f"{title}")
+        axis.axis("off")
+    figure.tight_layout()
