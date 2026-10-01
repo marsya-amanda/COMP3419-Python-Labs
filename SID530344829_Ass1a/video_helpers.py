@@ -254,18 +254,20 @@ def get_macroblocks(path: str | Path, frame_i: int = 0, block_width: int = 15, g
 
     #get n_blocks and n_cols
     n_blocks_per_row = int((vid_info.width - block_width / 2) // grid_stride)
-    #n_blocks_per_row += 1 if (vid_info.width - block_width / 2) % grid_stride >= (block_width+1) // 2 else 0
+    n_blocks_per_row += 1 if (vid_info.width - block_width / 2) % grid_stride >= (block_width+1) // 2 else 0
 
     n_blocks_per_column = int((vid_info.height - block_width / 2) // grid_stride)
-    #n_blocks_per_column += 1 if (vid_info.height - block_width / 2) % grid_stride >= (block_width+1) // 2 else 0
+    n_blocks_per_column += 1 if (vid_info.height - block_width / 2) % grid_stride >= (block_width+1) // 2 else 0
 
     # get candidate centres
-    pad_x = max(0, (vid_info.width - grid_stride * n_blocks_per_row) // 2)
-    pad_y = max(0, (vid_info.height - grid_stride * n_blocks_per_column) // 2)
+    pad_col = max(0, (vid_info.width - grid_stride * (n_blocks_per_row - 1) - block_width) // 2)
+    pad_row = max(0, (vid_info.height - grid_stride * (n_blocks_per_column - 1) - block_width) // 2)
+    #print((vid_info.width - grid_stride * n_blocks_per_row - block_width) // 2, pad_row)
+    
     candidate_centres = []
     for x_index in range(n_blocks_per_column):
         for y_index in range(n_blocks_per_row):
-            candidate_centres.append((int(x_index * grid_stride + block_width // 2 + pad_x), int(y_index * grid_stride + block_width // 2 + pad_y)))
+            candidate_centres.append((int(x_index * grid_stride + block_width // 2 + pad_row), int(y_index * grid_stride + block_width // 2 + pad_col)))
 
     # partition original frame to macroblocks
     macroblocks = []
@@ -314,10 +316,12 @@ def calculate_ssd(
     frame_2 = frame_2.astype(np.float64)
     ssd: np.float64 = 0
 
+    # need to optimise this - create into dict w frame value as key? avoid double-counting?
+    candidate = {}
     for v in range(-k, k+1):
         for u in range(-k, k+1):
             for c in range(0, n_channels):
-                ssd += np.square(np.subtract(frame_1[source_y+v, source_x+u, c], frame_2[candidate_y+v, candidate_x+u, c], dtype=np.float64)) # swap y and x around if wrong
+                ssd += np.square(frame_1[source_y+v, source_x+u, c] - frame_2[candidate_y+v, candidate_x+u, c]) # swap y and x around if wrong
 
     return ssd
 
@@ -413,12 +417,14 @@ def estimate_motion_consecutive_pairs(path: str | Path, frame_start: int = 0, co
     return all_reports
 
 def draw_macroblock(img: Image, out_path: str | Path | None, block: Macroblock) -> Image:
+    # draw macroblock w centre
     x1 = int(block.x - block.block_width // 2)
     x2 = int(block.x + (block.block_width + 1) // 2)
     y1 = int(block.y - block.block_width // 2)
     y2 = int(block.y + (block.block_width + 1) // 2)
 
-    cv2.rectangle(img, (y1, x1), (y2, x2), (255, 255, 255), 3) # draw macroblock rectangle on image in white with thickness 3
+    cv2.rectangle(img, (y1, x1), (y2, x2), (255, 255, 255), 2) # draw macroblock rectangle on image in white with thickness 3
+    cv2.circle(img, (block.y, block.x), 5, (255, 255, 255), -1)
     if out_path is not None:
         cv2.imwrite(out_path, img) # save
     return img
